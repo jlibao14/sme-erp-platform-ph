@@ -27,7 +27,7 @@ Multi-currency tables additionally store `currency_code` and the `fx_rate` used.
 App-layer query scoping is necessary but not sufficient — one forgotten
 `WHERE tenant_id = ?` leaks another company's data. All tenant-owned tables also
 enforce **Postgres Row-Level Security** (see
-`apps/api/prisma/migrations/manual/0001_rls_and_constraints.sql`). Each request
+`apps/api/prisma/manual/0001_rls_and_constraints.sql`). Each request
 runs inside a transaction that sets `app.current_tenant`; the database rejects
 cross-tenant rows even if the application has a bug. Run the API under a
 non-superuser role so RLS is actually enforced.

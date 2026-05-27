@@ -6,6 +6,7 @@ dist/
 build/
 .next/
 coverage/
+.turbo/
 .DS_Store
 *.log
 android/.gradle/
