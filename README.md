@@ -113,3 +113,53 @@ docs/
 11. Mobile approvals and inventory
 12. HRIS and payroll
 13. AI assistant and advanced analytics
+
+## Local Development
+
+### Prerequisites
+- Node.js 20+, pnpm 9+
+- PostgreSQL 16 (Docker: `docker compose up -d postgres`)
+
+### Backend (apps/api) setup
+
+```bash
+pnpm install
+
+# Run migrations as a privileged role (owner/superuser):
+cd apps/api
+DATABASE_URL="postgresql://OWNER:PASS@localhost:5432/sme_erp_db" pnpm prisma:migrate
+
+# Apply the RLS / constraints / append-only SQL (one-time, and after schema changes):
+DATABASE_URL="postgresql://OWNER:PASS@localhost:5432/sme_erp_db" pnpm prisma:migrate:manual
+
+# Seed the global permission catalogue + a demo tenant/admin:
+DATABASE_URL="postgresql://OWNER:PASS@localhost:5432/sme_erp_db" pnpm prisma:seed
+
+# Run the API under a NON-superuser role so Row-Level Security is enforced:
+DATABASE_URL="postgresql://sme_erp_app:PASS@localhost:5432/sme_erp_db" pnpm --filter @sme-erp/api dev
+```
+
+API docs (OpenAPI/Swagger) are served at `http://localhost:4000/api/docs`
+(raw spec at `/api/docs-json`). Demo login: tenant `demo`, `admin@demo.test` / `Admin123!`.
+
+### Tests
+
+```bash
+pnpm --filter @sme-erp/api test        # unit
+DATABASE_URL="postgresql://sme_erp_app:PASS@localhost:5432/sme_erp_db" \
+  pnpm --filter @sme-erp/api test:e2e  # e2e (needs a migrated+seeded DB, app role)
+```
+
+CI (`.github/workflows/ci.yml`) runs lint, build, unit tests, and the full e2e
+suite against a real Postgres with RLS enforced.
+
+## Implemented (v1 foundation)
+
+- Multi-tenant schema with Postgres Row-Level Security (defence-in-depth isolation)
+- Auth: login, JWT access + rotating refresh tokens, logout, password reset,
+  invitation acceptance, email verification, `/me`
+- RBAC: permission catalogue, roles, role-permission and user-role assignment,
+  `@RequirePermissions` enforcement
+- User management: invite, list/search, update, activate/deactivate, soft-delete
+- Organization: company, branch, and department CRUD
+- Standard response envelope, global error handling, pagination, audit logging

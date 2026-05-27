@@ -5,8 +5,12 @@ const prisma = new PrismaClient();
 
 // Global permission catalogue. Extend per module as features land.
 const PERMISSIONS: Array<{ key: string; module: string; description: string }> = [
+  { key: 'admin.user.view', module: 'admin', description: 'View users' },
   { key: 'admin.user.manage', module: 'admin', description: 'Manage users' },
   { key: 'admin.role.manage', module: 'admin', description: 'Manage roles and permissions' },
+  { key: 'admin.company.manage', module: 'admin', description: 'Manage companies' },
+  { key: 'admin.branch.manage', module: 'admin', description: 'Manage branches' },
+  { key: 'admin.department.manage', module: 'admin', description: 'Manage departments' },
   { key: 'sales.invoice.create', module: 'sales', description: 'Create sales invoices' },
   { key: 'sales.invoice.view', module: 'sales', description: 'View sales invoices' },
   { key: 'sales.invoice.approve', module: 'sales', description: 'Approve sales invoices' },
