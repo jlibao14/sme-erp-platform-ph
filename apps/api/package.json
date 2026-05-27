@@ -7,7 +7,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:manual": "psql \"$DATABASE_URL\" -f prisma/migrations/manual/0001_rls_and_constraints.sql",
@@ -36,6 +36,7 @@
     "@nestjs/cli": "^10.4.8",
     "@nestjs/schematics": "^10.2.3",
     "@nestjs/testing": "^10.4.15",
+    "@eslint/js": "^9.17.0",
     "@types/bcrypt": "^5.0.2",
     "@types/express": "^5.0.0",
     "@types/jest": "^29.5.14",
@@ -46,6 +47,7 @@
     "prisma": "^6.1.0",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "typescript-eslint": "^8.18.0"
   }
 }
