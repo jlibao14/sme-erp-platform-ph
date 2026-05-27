@@ -6,19 +6,37 @@ on:
   pull_request:
     branches: [main]
 
-# Dummy URL: prisma validate/generate parse the schema but do not connect.
-env:
-  DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-
 jobs:
   api:
-    name: API (lint, test, build)
+    name: API (lint, test, build, e2e)
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sme_erp_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Superuser connection for migrations/seed (bypasses RLS).
+      ADMIN_DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/sme_erp_db"
+      # Non-superuser app connection used by the app and e2e tests (RLS enforced).
+      APP_DATABASE_URL: "postgresql://sme_erp_app:app_password@localhost:5432/sme_erp_db"
+      JWT_ACCESS_SECRET: ci_access_secret
+      JWT_REFRESH_SECRET: ci_refresh_secret
+
     steps:
       - uses: actions/checkout@v4
 
-      # Version comes from the "packageManager" field in package.json.
-      # Passing `version` here too makes pnpm/action-setup@v4 error on conflict.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
@@ -32,15 +50,52 @@ jobs:
 
       - name: Validate Prisma schema
         run: pnpm --filter @sme-erp/api exec prisma validate
+        env:
+          DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
 
       - name: Generate Prisma client
         run: pnpm db:generate
+        env:
+          DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
 
       - name: Lint
         run: pnpm lint
 
-      - name: Test
-        run: pnpm test
-
       - name: Build
         run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Create non-superuser app role
+        run: |
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE sme_erp_app LOGIN PASSWORD 'app_password';"
+
+      - name: Apply migrations
+        working-directory: apps/api
+        run: pnpm exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
+
+      - name: Apply RLS / constraints SQL
+        run: psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f apps/api/prisma/manual/0001_rls_and_constraints.sql
+
+      - name: Grant app-role privileges
+        run: |
+          psql "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "GRANT USAGE ON SCHEMA public TO sme_erp_app;" \
+            -c "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO sme_erp_app;" \
+            -c "GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO sme_erp_app;"
+
+      - name: Seed
+        working-directory: apps/api
+        run: pnpm exec prisma db seed
+        env:
+          DATABASE_URL: ${{ env.ADMIN_DATABASE_URL }}
+
+      - name: E2E tests (RLS enforced as app role)
+        working-directory: apps/api
+        run: pnpm test:e2e
+        env:
+          DATABASE_URL: ${{ env.APP_DATABASE_URL }}

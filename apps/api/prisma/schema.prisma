@@ -11,7 +11,7 @@ datasource db {
 // Conventions (enforced by code review / docs/database-schema.md)
 // ---------------------------------------------------------------------------
 // - All tenant-owned tables carry tenant_id and are protected by Postgres
-//   Row-Level Security (see prisma/migrations/manual/0001_rls_and_constraints.sql).
+//   Row-Level Security (see prisma/manual/0001_rls_and_constraints.sql).
 // - Natural keys that are soft-deletable use @@index here; uniqueness among
 //   non-deleted rows is enforced by PARTIAL unique indexes in the same SQL
 //   migration (Prisma cannot express `WHERE deleted_at IS NULL` natively).
@@ -41,6 +41,12 @@ enum ApprovalStatus {
   CANCELLED
 }
 
+enum UserTokenType {
+  INVITE
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+}
+
 model Tenant {
   id          String       @id @default(uuid()) @db.Uuid
   name        String
@@ -59,6 +65,7 @@ model Tenant {
   users       User[]
   roles       Role[]
   sessions    Session[]
+  userTokens  UserToken[]
   auditLogs   AuditLog[]
 
   // slug uniqueness among non-deleted tenants is a PARTIAL unique index (SQL migration)
@@ -170,6 +177,7 @@ model User {
   department     Department? @relation(fields: [departmentId], references: [id])
   userRoles      UserRole[]
   sessions       Session[]
+  tokens         UserToken[]
   auditLogs      AuditLog[]
 
   // (tenant_id, email) uniqueness among non-deleted rows is a PARTIAL unique index (SQL migration)
@@ -201,6 +209,27 @@ model Session {
   @@index([userId])
   @@index([refreshTokenHash])
   @@map("sessions")
+}
+
+// Single-use tokens for invitations, password resets, and email verification.
+// Only the SHA-256 hash of the token is stored.
+model UserToken {
+  id        String        @id @default(uuid()) @db.Uuid
+  tenantId  String        @map("tenant_id") @db.Uuid
+  userId    String        @map("user_id") @db.Uuid
+  type      UserTokenType
+  tokenHash String        @map("token_hash")
+  expiresAt DateTime      @map("expires_at")
+  usedAt    DateTime?     @map("used_at")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+  user      User          @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("user_tokens")
 }
 
 model Role {
