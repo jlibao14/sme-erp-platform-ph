@@ -69,6 +69,17 @@ The web app must include:
 - SQLite or Hive
 - Firebase Cloud Messaging
 
+### API client & shared contract
+
+Flutter/Dart cannot consume the TypeScript `packages/validation` (Zod) or
+`packages/shared-types`. To avoid hand-duplicating DTOs and validation rules
+across two languages, the **mobile API client and models are generated from the
+backend OpenAPI spec** (`/api/docs-json`) using `openapi-generator` (dart-dio).
+Validation rules that must be shared are encoded in the OpenAPI schema (formats,
+min/max, required) so both web and mobile inherit them from one source of truth.
+Decision: keep Flutter; regenerate the Dart client whenever the API contract
+changes (wire it into CI).
+
 ### Required Mobile Screens
 
 1. Login

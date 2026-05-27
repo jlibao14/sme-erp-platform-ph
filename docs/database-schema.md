@@ -13,7 +13,58 @@ created_at TIMESTAMP
 updated_at TIMESTAMP
 deleted_at TIMESTAMP NULL
 status VARCHAR
+version INT NOT NULL DEFAULT 0   -- optimistic locking for concurrent edits
 ```
+
+### Money
+
+All monetary amounts use `DECIMAL(18, 4)` (Prisma `Decimal @db.Decimal(18, 4)`).
+Never use float/double — rounding errors are unacceptable in finance/payroll.
+Multi-currency tables additionally store `currency_code` and the `fx_rate` used.
+
+### Tenant isolation (defence in depth)
+
+App-layer query scoping is necessary but not sufficient — one forgotten
+`WHERE tenant_id = ?` leaks another company's data. All tenant-owned tables also
+enforce **Postgres Row-Level Security** (see
+`apps/api/prisma/migrations/manual/0001_rls_and_constraints.sql`). Each request
+runs inside a transaction that sets `app.current_tenant`; the database rejects
+cross-tenant rows even if the application has a bug. Run the API under a
+non-superuser role so RLS is actually enforced.
+
+### Soft delete + uniqueness
+
+Natural keys (slug, email, branch code, role name) are unique only **among
+non-deleted rows**, enforced by PARTIAL unique indexes
+(`... WHERE deleted_at IS NULL`) in the SQL migration above. A plain composite
+`UNIQUE` would permanently block reusing a value after soft delete.
+
+### Gapless document numbering
+
+Financial/legal documents (BIR OR/SI, journal entries, payments) require
+**gapless, sequential numbers per series** — a `UNIQUE` column does not provide
+this and will gap/collide under concurrency. Use a dedicated sequence table:
+
+```sql
+document_sequences (
+  id, tenant_id, company_id,
+  doc_type VARCHAR,     -- SALES_INVOICE | OFFICIAL_RECEIPT | JOURNAL | ...
+  series   VARCHAR,
+  prefix   VARCHAR,
+  next_no  BIGINT,
+  UNIQUE (tenant_id, company_id, doc_type, series)
+)
+```
+
+Allocate the next number with `SELECT ... FOR UPDATE` (or `UPDATE ... RETURNING`)
+inside the same transaction that inserts the document.
+
+### Inventory costing
+
+Costing method is **moving weighted average** for the MVP. `inventory_balances`
+stores a running `avg_unit_cost`; every posted `inventory_transaction` updates it.
+Balances are always derived from the append-only transaction ledger, never
+edited directly. (A future FIFO option would require per-receipt cost layers.)
 
 Financial, payroll, and inventory transactions must also include:
 
@@ -44,6 +95,7 @@ user_roles
 sessions
 subscriptions
 subscription_plans
+document_sequences
 audit_logs
 notifications
 approval_workflows
@@ -142,9 +194,15 @@ payroll_runs
 payroll_items
 payslips
 salary_structures
-government_contribution_settings
+contribution_tables          -- effective-dated (SSS, PhilHealth, HDMF, withholding)
+contribution_brackets        -- bracket rows per contribution_table
 tax_settings
 ```
+
+> Statutory rates change yearly. `contribution_tables` / `contribution_brackets`
+> are **effective-dated** (`effective_from` / `effective_to`) so historical
+> payroll recomputes correctly and new rates are config, not code. See
+> `docs/compliance-ph.md`.
 
 ## Indexing Requirements
 

@@ -69,6 +69,24 @@ status
 5. Tenant Admin can only manage their own company.
 6. Cross-tenant data leakage must be blocked by middleware, guards, services, and database constraints.
 
+### Enforcement layers
+
+Isolation is enforced at multiple layers so a single bug cannot leak data:
+
+1. **Auth guard** resolves `tenant_id` from the JWT and rejects mismatched contexts.
+2. **Service layer** scopes every query by `tenant_id`.
+3. **Database (Row-Level Security)** is the backstop: each request runs in a
+   transaction that sets `app.current_tenant`, and Postgres RLS policies reject
+   any cross-tenant row even when the application forgets to filter. See
+   `apps/api/prisma/migrations/manual/0001_rls_and_constraints.sql`. The API must
+   run under a non-superuser DB role for RLS to take effect.
+
+### API contract
+
+The backend exposes an **OpenAPI** spec (`/api/docs`, raw at `/api/docs-json`)
+via `@nestjs/swagger`. This single contract drives both the web client types and
+the **Flutter Dart client codegen**, so mobile and web stay in sync with the API.
+
 ## Database Strategy
 
 ### MVP
