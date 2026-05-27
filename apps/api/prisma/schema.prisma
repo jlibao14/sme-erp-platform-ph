@@ -7,6 +7,20 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ---------------------------------------------------------------------------
+// Conventions (enforced by code review / docs/database-schema.md)
+// ---------------------------------------------------------------------------
+// - All tenant-owned tables carry tenant_id and are protected by Postgres
+//   Row-Level Security (see prisma/migrations/manual/0001_rls_and_constraints.sql).
+// - Natural keys that are soft-deletable use @@index here; uniqueness among
+//   non-deleted rows is enforced by PARTIAL unique indexes in the same SQL
+//   migration (Prisma cannot express `WHERE deleted_at IS NULL` natively).
+// - All monetary amounts MUST use Decimal @db.Decimal(18, 4). Never Float.
+// - Mutable records carry `version` for optimistic locking.
+// - created_by / updated_by hold the acting user id (no FK: keeps audit rows
+//   valid even if the user is later removed, and avoids cross-tenant FK noise).
+// ---------------------------------------------------------------------------
+
 enum TenantStatus {
   ACTIVE
   SUSPENDED
@@ -30,17 +44,25 @@ enum ApprovalStatus {
 model Tenant {
   id          String       @id @default(uuid()) @db.Uuid
   name        String
-  slug        String       @unique
+  slug        String
   status      TenantStatus @default(ACTIVE)
+  version     Int          @default(0)
+  createdBy   String?      @map("created_by") @db.Uuid
+  updatedBy   String?      @map("updated_by") @db.Uuid
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   deletedAt   DateTime?    @map("deleted_at")
 
   companies   Company[]
+  branches    Branch[]
+  departments Department[]
   users       User[]
   roles       Role[]
+  sessions    Session[]
   auditLogs   AuditLog[]
 
+  // slug uniqueness among non-deleted tenants is a PARTIAL unique index (SQL migration)
+  @@index([slug])
   @@map("tenants")
 }
 
@@ -54,12 +76,17 @@ model Company {
   phone       String?
   address     String?
   status      String    @default("active")
+  version     Int       @default(0)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
   branches    Branch[]
+  departments Department[]
+  users       User[]
 
   @@index([tenantId])
   @@map("companies")
@@ -73,38 +100,107 @@ model Branch {
   code        String
   address     String?
   status      String    @default("active")
+  version     Int       @default(0)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
   deletedAt   DateTime? @map("deleted_at")
 
   company     Company   @relation(fields: [companyId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  users       User[]
 
-  @@unique([tenantId, code])
+  // (tenant_id, code) uniqueness among non-deleted rows is a PARTIAL unique index (SQL migration)
   @@index([tenantId])
   @@index([companyId])
+  @@index([tenantId, code])
   @@map("branches")
 }
 
-model User {
-  id             String     @id @default(uuid()) @db.Uuid
-  tenantId       String     @map("tenant_id") @db.Uuid
-  email          String
-  passwordHash   String     @map("password_hash")
-  firstName      String     @map("first_name")
-  lastName       String     @map("last_name")
-  status         UserStatus @default(INVITED)
-  lastLoginAt    DateTime?  @map("last_login_at")
-  createdAt      DateTime   @default(now()) @map("created_at")
-  updatedAt      DateTime   @updatedAt @map("updated_at")
-  deletedAt      DateTime?  @map("deleted_at")
+model Department {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  companyId   String    @map("company_id") @db.Uuid
+  name        String
+  code        String
+  status      String    @default("active")
+  version     Int       @default(0)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
 
-  tenant         Tenant     @relation(fields: [tenantId], references: [id])
+  company     Company   @relation(fields: [companyId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  users       User[]
+
+  // (tenant_id, company_id, code) uniqueness among non-deleted rows is a PARTIAL unique index (SQL migration)
+  @@index([tenantId])
+  @@index([companyId])
+  @@map("departments")
+}
+
+model User {
+  id             String      @id @default(uuid()) @db.Uuid
+  tenantId       String      @map("tenant_id") @db.Uuid
+  companyId      String?     @map("company_id") @db.Uuid
+  branchId       String?     @map("branch_id") @db.Uuid
+  departmentId   String?     @map("department_id") @db.Uuid
+  email          String
+  passwordHash   String      @map("password_hash")
+  firstName      String      @map("first_name")
+  lastName       String      @map("last_name")
+  status         UserStatus  @default(INVITED)
+  mfaEnabled     Boolean     @default(false) @map("mfa_enabled")
+  mfaSecret      String?     @map("mfa_secret")
+  emailVerifiedAt DateTime?  @map("email_verified_at")
+  lastLoginAt    DateTime?   @map("last_login_at")
+  version        Int         @default(0)
+  createdBy      String?     @map("created_by") @db.Uuid
+  updatedBy      String?     @map("updated_by") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  deletedAt      DateTime?   @map("deleted_at")
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id])
+  company        Company?    @relation(fields: [companyId], references: [id])
+  branch         Branch?     @relation(fields: [branchId], references: [id])
+  department     Department? @relation(fields: [departmentId], references: [id])
   userRoles      UserRole[]
+  sessions       Session[]
   auditLogs      AuditLog[]
 
-  @@unique([tenantId, email])
+  // (tenant_id, email) uniqueness among non-deleted rows is a PARTIAL unique index (SQL migration)
   @@index([tenantId])
+  @@index([tenantId, email])
+  @@index([companyId])
+  @@index([branchId])
   @@map("users")
+}
+
+// Refresh-token session store: enables rotation, revocation on logout, and
+// device/session listing. The raw refresh token is never stored, only a hash.
+model Session {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash")
+  userAgent        String?   @map("user_agent")
+  ipAddress        String?   @map("ip_address")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  replacedById     String?   @map("replaced_by_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([refreshTokenHash])
+  @@map("sessions")
 }
 
 model Role {
@@ -113,6 +209,9 @@ model Role {
   name        String
   description String?
   isSystem    Boolean          @default(false) @map("is_system")
+  version     Int              @default(0)
+  createdBy   String?          @map("created_by") @db.Uuid
+  updatedBy   String?          @map("updated_by") @db.Uuid
   createdAt   DateTime         @default(now()) @map("created_at")
   updatedAt   DateTime         @updatedAt @map("updated_at")
   deletedAt   DateTime?        @map("deleted_at")
@@ -121,11 +220,13 @@ model Role {
   userRoles   UserRole[]
   permissions RolePermission[]
 
-  @@unique([tenantId, name])
+  // (tenant_id, name) uniqueness among non-deleted rows is a PARTIAL unique index (SQL migration)
   @@index([tenantId])
+  @@index([tenantId, name])
   @@map("roles")
 }
 
+// Permissions are a global catalogue (not tenant-owned): e.g. sales.invoice.create
 model Permission {
   id          String           @id @default(uuid()) @db.Uuid
   key         String           @unique
@@ -148,6 +249,7 @@ model RolePermission {
   permission   Permission @relation(fields: [permissionId], references: [id])
 
   @@unique([roleId, permissionId])
+  @@index([roleId])
   @@map("role_permissions")
 }
 
@@ -161,9 +263,12 @@ model UserRole {
   role      Role     @relation(fields: [roleId], references: [id])
 
   @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
   @@map("user_roles")
 }
 
+// Append-only: UPDATE/DELETE are revoked at the DB level (SQL migration).
 model AuditLog {
   id          String   @id @default(uuid()) @db.Uuid
   tenantId    String   @map("tenant_id") @db.Uuid
@@ -183,5 +288,6 @@ model AuditLog {
   @@index([tenantId])
   @@index([userId])
   @@index([module, action])
+  @@index([createdAt])
   @@map("audit_logs")
 }
