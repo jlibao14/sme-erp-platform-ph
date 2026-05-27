@@ -2,7 +2,7 @@
 -- Manual migration: Row-Level Security, partial unique indexes, append-only
 -- audit log. Apply AFTER the baseline Prisma migration that creates the tables.
 --
---   psql "$DATABASE_URL" -f prisma/migrations/manual/0001_rls_and_constraints.sql
+--   psql "$DATABASE_URL" -f prisma/manual/0001_rls_and_constraints.sql
 --
 -- These constraints cannot be expressed in schema.prisma and are the database
 -- backstop for tenant isolation (defence in depth) and BIR/soft-delete rules.

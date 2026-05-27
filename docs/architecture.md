@@ -78,7 +78,7 @@ Isolation is enforced at multiple layers so a single bug cannot leak data:
 3. **Database (Row-Level Security)** is the backstop: each request runs in a
    transaction that sets `app.current_tenant`, and Postgres RLS policies reject
    any cross-tenant row even when the application forgets to filter. See
-   `apps/api/prisma/migrations/manual/0001_rls_and_constraints.sql`. The API must
+   `apps/api/prisma/manual/0001_rls_and_constraints.sql`. The API must
    run under a non-superuser DB role for RLS to take effect.
 
 ### API contract
